@@ -1,17 +1,27 @@
 package com.guru.bonial.viewmodel
 
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
-import androidx.lifecycle.*
+import androidx.lifecycle.Observer
+import androidx.paging.PagedList
+import com.guru.bonial.api.MockApiService
 import com.guru.bonial.domain.INewsRepository
+import com.guru.bonial.domain.NewsRepository
+import com.guru.bonial.models.News
+import com.guru.bonial.models.PaginatedResponse
+import com.guru.bonial.models.toModel
+import com.guru.bonial.network.ApiService
+import com.guru.bonial.view.news.model.NewsDataModel
 import com.guru.bonial.view.news.utils.LoadingState
+import com.guru.bonial.view.news.utils.PagedListWrapper
 import com.guru.bonial.view.news.viewmodel.MainViewModel
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.mockito.Mock
 import org.mockito.Mockito
+import org.mockito.Mockito.`when`
 import org.mockito.junit.MockitoJUnitRunner
 
 
@@ -22,85 +32,118 @@ class TestMainViewMode {
     @JvmField
     var instantExecutorRule = InstantTaskExecutorRule()
 
-    @Mock
     private lateinit var newsRepository: INewsRepository
 
     private lateinit var mainViewModel: MainViewModel
 
-    val lifecycleOwner = TestLifecycleOwner()
+    private lateinit var apiService: MockApiService
+
+    private val mockApiService = Mockito.mock(ApiService::class.java)
 
     @Before
     fun setup() {
+        apiService = MockApiService()
+        newsRepository = NewsRepository(mockApiService)
         mainViewModel = Mockito.spy(MainViewModel(newsRepository))
-        mainViewModel!!.pageSize.testObserver()
     }
 
     @Test
-    fun testNull() {
-        Assert.assertNotNull(mainViewModel!!.pageSize)
-        Assert.assertTrue(mainViewModel!!.pageSize.hasObservers())
+    fun testNotEmpty() {
+        val pageSize = 21
+        val newNews = apiService.createNews(21, startFrom = 21)
+        val response = PaginatedResponse<News>(newNews, true, 28)
+
+        val deferred = CompletableDeferred<PaginatedResponse<News>>()
+        deferred.complete(response)
+
+        `when`(mockApiService.getTopHeadlines(1, pageSize)).thenReturn(deferred)
+        newsRepository = NewsRepository(mockApiService)
+
+        val mainViewModel = MainViewModel(newsRepository)
+        mainViewModel.news.observeForever {
+            assert(it != null)
+            assert(it?.isEmpty() == true)
+        }
     }
 
     @Test
-    fun testPageSizeValue() {
-        Assert.assertNotNull(mainViewModel.pageSize.hasObservers())
-        Assert.assertEquals(mainViewModel.pageSize.value, 21)
+    fun testEmpty() {
+        val pageSize = 21
+        val response = PaginatedResponse<News>(listOf(), true, 28)
+
+        val deferred = CompletableDeferred<PaginatedResponse<News>>()
+        deferred.complete(response)
+
+        `when`(mockApiService.getTopHeadlines(1, pageSize)).thenReturn(deferred)
+        newsRepository = NewsRepository(mockApiService)
+
+        val mainViewModel = MainViewModel(newsRepository)
+        mainViewModel.news.observeForever {
+            assert(it != null)
+            assert(it?.isEmpty() == true)
+        }
+    }
+/*
+
+    @Test
+    fun testLoadingStateSuccess() {
+        val newNews = apiService.createNews(21, startFrom = 21)
+        apiService.addNews(1, 40, newNews)
+
+        val response = PaginatedResponse<News>(listOf(), true, 28)
+
+        val deferred = CompletableDeferred<PaginatedResponse<News>>()
+        deferred.complete(response)
+
+        `when`(mockApiService.getTopHeadlines(1, 21)).thenReturn(deferred)
+        val wrapper = newsRepository.getNews(21)
+        val loadingState = getLoadingState(wrapper)!!
+
+        assert(loadingState, instanceOf(LoadingState.SUCCESS::class.java))
     }
 
     @Test
-    fun testLoadingState() {
-        mainViewModel.newsTransformer.observe(lifecycleOwner, Observer {
-            Assert.assertEquals(it!!.loadingState, LoadingState.LOADING)
-        })
+    fun testLoadingStateError() {
+        apiService.failure = true
+        apiService.addNews(1, 40, listOf())
+
+        val response = PaginatedResponse<News>(listOf(), true, 28)
+
+        val deferred = CompletableDeferred<PaginatedResponse<News>>()
+        deferred.complete(response)
+
+        `when`(mockApiService.getTopHeadlines(1, 21)).thenReturn(deferred)
+        val wrapper = newsRepository.getNews(21)
+        val loadingState = getLoadingState(wrapper)!!
+
+        assert(loadingState, instanceOf(LoadingState.ERROR::class.java))
+    }
+*/
+
+    private fun getMessages(listing: PagedListWrapper<NewsDataModel>): List<NewsDataModel> {
+        val observer = LoggingObserver<PagedList<NewsDataModel>>()
+        listing.pagedList.observeForever(observer)
+        Assert.assertNotNull(observer.value)
+        return observer.value!!
     }
 
-    @Test
-    fun testTransformations() {
-        //Todo transformations
-
+    private fun getLoadingState(listing: PagedListWrapper<NewsDataModel>): LoadingState? {
+        val networkObserver = LoggingObserver<LoadingState>()
+        listing.loadingState.observeForever(networkObserver)
+        return networkObserver.value
     }
 
-    fun <T> LiveData<T>.testObserver() = TestObserver<T>().also {
-        observeForever(it)
-    }
-
-    class TestObserver<T> : Observer<T> {
-        val observedValues = mutableListOf<T?>()
-
-        override fun onChanged(value: T?) {
-            observedValues.add(value)
+    private class LoggingObserver<T> : Observer<T> {
+        var value: T? = null
+        override fun onChanged(t: T?) {
+            this.value = t
         }
     }
 
-    inner class TestLifecycleOwner : LifecycleOwner {
-        private val mLifecycle: LifecycleRegistry
-
-        init {
-            mLifecycle = LifecycleRegistry(this)
-        }
-
-        override fun getLifecycle(): Lifecycle {
-            return mLifecycle
-        }
-
-        fun handleEvent(event: Lifecycle.Event) {
-            mLifecycle.handleLifecycleEvent(event)
-        }
+    fun List<News>.toModel(): List<NewsDataModel> {
+        return fold(mutableListOf<NewsDataModel>()) { acc, newsTemp ->
+            acc.add(newsTemp.toModel())
+            acc
+        }.toList()
     }
-
-    /* private fun getNews(): PagedListWrapper<News> {
-         val newsResponse = JsonFileReader.read(
-             javaClass.classLoader.getResourceAsStream("news.json"),
-             Gson(), PaginatedResponse::class.java
-         ).blockingFirst()
-
-         val modelList = mutableListOf<NewsDataModel>()
-         val newsList = newsResponse.articles.fold(modelList)
-         { acc, news ->
-             acc.add(news.toModel())
-             acc
-         }
-
-         val pagedListWrapper = PagedListWrapper.pagedList
-     } */
 }

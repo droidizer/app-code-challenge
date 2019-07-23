@@ -1,4 +1,4 @@
-package com.guru.bonial.api;
+package com.guru.bonial.api.test;
 
 import org.junit.Test;
 
