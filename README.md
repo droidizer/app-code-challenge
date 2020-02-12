@@ -1,4 +1,4 @@
-# bonial-code-challenge
+#news app
 Code Challenge as a part of Bonial Interview process
 
 
